@@ -32,7 +32,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     env_logger::init();
 
     let args = Args::parse();
-    let root = PathBuf::from(&args.root_dir);
+
+    let root = Path::new(&args.root_dir).canonicalize()?;
 
     // Gather gzipped files with sizes
     let (gz_files, total_size) = gather_gz_files(&root);
