@@ -455,6 +455,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "sieve"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "env_logger",
+ "flate2",
+ "indicatif",
+ "log",
+ "num-format",
+ "rayon",
+ "tempfile",
+ "walkdir",
+]
+
+[[package]]
 name = "strsim"
 version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -483,21 +498,6 @@ dependencies = [
  "once_cell",
  "rustix",
  "windows-sys",
-]
-
-[[package]]
-name = "trim-logs"
-version = "0.1.0"
-dependencies = [
- "clap",
- "env_logger",
- "flate2",
- "indicatif",
- "log",
- "num-format",
- "rayon",
- "tempfile",
- "walkdir",
 ]
 
 [[package]]
