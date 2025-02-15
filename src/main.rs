@@ -4,11 +4,14 @@ use flate2::write::GzEncoder;
 use flate2::Compression;
 use indicatif::{ProgressBar, ProgressStyle};
 use log::{debug, warn};
+use num_format::{Locale, ToFormattedString};
 use rayon::prelude::*;
 use std::error::Error;
 use std::fs::{copy, File};
 use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 use tempfile::NamedTempFile;
 use walkdir::WalkDir;
 
@@ -43,20 +46,41 @@ fn main() -> Result<(), Box<dyn Error>> {
             .progress_chars("##-"),
     );
 
-    // Process each file in parallel, incrementing by its precomputed size
+    // Atomic counters for total lines read and removed
+    let total_lines_read = Arc::new(AtomicU64::new(0));
+    let total_lines_removed = Arc::new(AtomicU64::new(0));
+
+    // Process files in parallel
     let pool = rayon::ThreadPoolBuilder::new()
         .num_threads(args.threads)
         .build()?;
     pool.install(|| {
         gz_files.par_iter().for_each(|(file_path, file_size)| {
-            if let Err(e) = remove_lines_with_patterns(file_path, &args.patterns) {
-                warn!("Error processing {}: {}", file_path.display(), e);
+            match remove_lines_with_patterns(file_path, &args.patterns) {
+                Ok((read, removed)) => {
+                    total_lines_read.fetch_add(read, Ordering::Relaxed);
+                    total_lines_removed.fetch_add(removed, Ordering::Relaxed);
+                }
+                Err(e) => warn!("Error processing {}: {}", file_path.display(), e),
             }
-            pb.inc(*file_size); // Increment progress by the file's size
+            pb.inc(*file_size);
         });
     });
 
     pb.finish_with_message("Done!");
+
+    // Print final summary
+    // ... add locale-aware separators
+    println!(
+        "Removed {} lines from a total of {} lines read.",
+        total_lines_removed
+            .load(Ordering::Relaxed)
+            .to_formatted_string(&Locale::en),
+        total_lines_read
+            .load(Ordering::Relaxed)
+            .to_formatted_string(&Locale::en),
+    );
+
     Ok(())
 }
 
