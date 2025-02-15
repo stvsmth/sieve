@@ -3,6 +3,7 @@ use flate2::read::GzDecoder;
 use flate2::write::GzEncoder;
 use flate2::Compression;
 use indicatif::{ProgressBar, ProgressStyle};
+use log::{debug, warn};
 use rayon::prelude::*;
 use std::error::Error;
 use std::fs::{copy, File};
@@ -25,6 +26,8 @@ struct Args {
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
+    env_logger::init();
+
     let args = Args::parse();
     let root = PathBuf::from(&args.root_dir);
 
@@ -47,7 +50,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     pool.install(|| {
         gz_files.par_iter().for_each(|(file_path, file_size)| {
             if let Err(e) = remove_lines_with_patterns(file_path, &args.patterns) {
-                eprintln!("Error processing {}: {}", file_path.display(), e);
+                warn!("Error processing {}: {}", file_path.display(), e);
             }
             pb.inc(*file_size); // Increment progress by the file's size
         });
@@ -109,11 +112,12 @@ fn remove_lines_with_patterns(
     writer.flush()?; // Ensure compression is finalized
     drop(writer); // Close GzEncoder before replacing file
 
-    // println!(
-    //     "Processed {}: removed {} lines.",
-    //     file_path.display(),
-    //     removed_count
-    // );
+    debug!(
+        "Processed {}: removed {} lines of {} total lines.",
+        file_path.display(),
+        removed_count,
+        read_count,
+    );
 
     // Replace original file
     copy(temp_file.path(), file_path)?;
