@@ -39,8 +39,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     let (gz_files, total_size) = gather_gz_files(&root);
 
     // Create a progress bar
-    let pb = ProgressBar::new(total_size);
-    pb.set_style(
+    let progress = ProgressBar::new(total_size);
+    progress.set_style(
         ProgressStyle::default_bar()
             .template("[{elapsed_precise}] {bar:40.cyan/blue} {bytes}/{total_bytes} ({eta})")
             .unwrap()
@@ -64,11 +64,11 @@ fn main() -> Result<(), Box<dyn Error>> {
                 }
                 Err(e) => warn!("Error processing {}: {}", file_path.display(), e),
             }
-            pb.inc(*file_size);
+            progress.inc(*file_size);
         });
     });
 
-    pb.finish_with_message("Done!");
+    progress.finish_with_message("Done!");
 
     // Print final summary
     // ... add locale-aware separators
