@@ -149,3 +149,52 @@ fn remove_lines_with_patterns(
 
     Ok((read_count, removed_count))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+    use tempfile::tempdir;
+
+    #[test]
+    fn test_gather_gz_files() {
+        let dir = tempdir().unwrap();
+        let file_path = dir.path().join("test.gz");
+        File::create(&file_path).unwrap();
+
+        let (files, total_size) = gather_gz_files(dir.path());
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].0, file_path);
+        assert_eq!(total_size, 0);
+    }
+
+    #[test]
+    fn test_remove_lines_with_patterns() {
+        let dir = tempdir().unwrap();
+        let file_path = dir.path().join("test.gz");
+
+        // Create a gzipped file with some content
+        {
+            let file = File::create(&file_path).unwrap();
+            let gz = GzEncoder::new(file, Compression::default());
+            let mut writer = BufWriter::new(gz);
+            writeln!(writer, "line 1").unwrap();
+            writeln!(writer, "line 2 pattern").unwrap();
+            writeln!(writer, "line 3").unwrap();
+        }
+
+        let patterns = vec!["pattern".to_string()];
+        let (read, removed) = remove_lines_with_patterns(&file_path, &patterns).unwrap();
+
+        assert_eq!(read, 3);
+        assert_eq!(removed, 1);
+
+        // Verify the content of the file
+        let file = File::open(&file_path).unwrap();
+        let gz = GzDecoder::new(file);
+        let reader = BufReader::new(gz);
+        let lines: Vec<String> = reader.lines().map(|l| l.unwrap()).collect();
+
+        assert_eq!(lines, vec!["line 1", "line 3"]);
+    }
+}
