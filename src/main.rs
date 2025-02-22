@@ -15,6 +15,18 @@ use std::sync::Arc;
 use tempfile::NamedTempFile;
 use walkdir::WalkDir;
 
+// TODO:
+//  * Error Handling: The code uses Box<dyn Error> for error handling, which can be
+//    less informative than using specific error types. Consider using a custom error
+//    type or `thiserror` crate for more detailed error handling.
+//  * Logging Levels:  Ensure that the logging configuration in env_logger::init() is
+//    set to capture these levels as needed.
+//  * Progress Bar Template: Consider making progress bar width configurable or
+//    adaptive to terminal width.
+//  * Ensure that the number of threads (args.threads) is appropriate for the system's
+//    capabilities. Maybe set a sensible default based on the # of available cores.
+//  * Locale Handling: Consider removing the hard-coded locale for number formatting
+
 #[derive(Parser, Debug)]
 struct Args {
     /// Root directory
