@@ -197,4 +197,87 @@ mod tests {
 
         assert_eq!(lines, vec!["line 1", "line 3"]);
     }
+
+    #[test]
+    fn test_empty_directory() {
+        let dir = tempdir().unwrap();
+        let (files, total_size) = gather_gz_files(dir.path());
+        assert!(files.is_empty());
+        assert_eq!(total_size, 0);
+    }
+
+    #[test]
+    fn test_multiple_patterns() {
+        let dir = tempdir().unwrap();
+        let file_path = dir.path().join("test.gz");
+
+        // Create test content
+        {
+            let file = File::create(&file_path).unwrap();
+            let gz = GzEncoder::new(file, Compression::default());
+            let mut writer = BufWriter::new(gz);
+            writeln!(writer, "keep this line").unwrap();
+            writeln!(writer, "remove pattern1").unwrap();
+            writeln!(writer, "also pattern2 here").unwrap();
+            writeln!(writer, "keep this too").unwrap();
+        }
+
+        let patterns = vec!["pattern1".to_string(), "pattern2".to_string()];
+        let (read, removed) = remove_lines_with_patterns(&file_path, &patterns).unwrap();
+
+        assert_eq!(read, 4);
+        assert_eq!(removed, 2);
+
+        // Verify content
+        let file = File::open(&file_path).unwrap();
+        let gz = GzDecoder::new(file);
+        let reader = BufReader::new(gz);
+        let lines: Vec<String> = reader.lines().map(|l| l.unwrap()).collect();
+
+        assert_eq!(lines, vec!["keep this line", "keep this too"]);
+    }
+
+    #[test]
+    fn test_large_file() {
+        let dir = tempdir().unwrap();
+        let file_path = dir.path().join("large.gz");
+
+        // Create large test content
+        {
+            let file = File::create(&file_path).unwrap();
+            let gz = GzEncoder::new(file, Compression::default());
+            let mut writer = BufWriter::new(gz);
+            for i in 0..1000 {
+                writeln!(
+                    writer,
+                    "line {} {}",
+                    i,
+                    if i % 10 == 0 { "remove" } else { "keep" }
+                )
+                .unwrap();
+            }
+        }
+
+        let patterns = vec!["remove".to_string()];
+        let (read, removed) = remove_lines_with_patterns(&file_path, &patterns).unwrap();
+
+        assert_eq!(read, 1000);
+        assert_eq!(removed, 100); // Every 10th line should be removed
+    }
+
+    #[test]
+    fn test_invalid_gz_file() {
+        let dir = tempdir().unwrap();
+        let file_path = dir.path().join("invalid.gz");
+
+        // Create an invalid gzip file
+        {
+            let mut file = File::create(&file_path).unwrap();
+            file.write_all(b"not a valid gz file").unwrap();
+        }
+
+        let patterns = vec!["pattern".to_string()];
+        let result = remove_lines_with_patterns(&file_path, &patterns);
+        assert!(result.is_err());
+    }
 }
