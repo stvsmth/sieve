@@ -199,6 +199,280 @@ mod tests {
     }
 
     #[test]
+    fn test_no_patterns() {
+        let dir = tempdir().unwrap();
+        let file_path = dir.path().join("test.gz");
+
+        // Create a gzipped file with some content
+        {
+            let file = File::create(&file_path).unwrap();
+            let gz = GzEncoder::new(file, Compression::default());
+            let mut writer = BufWriter::new(gz);
+            writeln!(writer, "line 1").unwrap();
+            writeln!(writer, "line 2").unwrap();
+            writeln!(writer, "line 3").unwrap();
+        }
+
+        let patterns: Vec<String> = vec![];
+        let (read, removed) = remove_lines_with_patterns(&file_path, &patterns).unwrap();
+
+        assert_eq!(read, 3);
+        assert_eq!(removed, 0);
+
+        // Verify the content of the file
+        let file = File::open(&file_path).unwrap();
+        let gz = GzDecoder::new(file);
+        let reader = BufReader::new(gz);
+        let lines: Vec<String> = reader.lines().map(|l| l.unwrap()).collect();
+
+        assert_eq!(lines, vec!["line 1", "line 2", "line 3"]);
+    }
+
+    #[test]
+    fn test_non_existent_patterns() {
+        let dir = tempdir().unwrap();
+        let file_path = dir.path().join("test.gz");
+
+        // Create a gzipped file with some content
+        {
+            let file = File::create(&file_path).unwrap();
+            let gz = GzEncoder::new(file, Compression::default());
+            let mut writer = BufWriter::new(gz);
+            writeln!(writer, "line 1").unwrap();
+            writeln!(writer, "line 2").unwrap();
+            writeln!(writer, "line 3").unwrap();
+        }
+
+        let patterns = vec!["nonexistent".to_string()];
+        let (read, removed) = remove_lines_with_patterns(&file_path, &patterns).unwrap();
+
+        assert_eq!(read, 3);
+        assert_eq!(removed, 0);
+
+        // Verify the content of the file
+        let file = File::open(&file_path).unwrap();
+        let gz = GzDecoder::new(file);
+        let reader = BufReader::new(gz);
+        let lines: Vec<String> = reader.lines().map(|l| l.unwrap()).collect();
+
+        assert_eq!(lines, vec!["line 1", "line 2", "line 3"]);
+    }
+
+    #[test]
+    fn test_special_characters_in_patterns() {
+        let dir = tempdir().unwrap();
+        let file_path = dir.path().join("test.gz");
+
+        // Create a gzipped file with some content
+        {
+            let file = File::create(&file_path).unwrap();
+            let gz = GzEncoder::new(file, Compression::default());
+            let mut writer = BufWriter::new(gz);
+            writeln!(writer, "line 1").unwrap();
+            writeln!(writer, "line 2 special*chars").unwrap();
+            writeln!(writer, "line 3").unwrap();
+        }
+
+        let patterns = vec!["special*chars".to_string()];
+        let (read, removed) = remove_lines_with_patterns(&file_path, &patterns).unwrap();
+
+        assert_eq!(read, 3);
+        assert_eq!(removed, 1);
+
+        // Verify the content of the file
+        let file = File::open(&file_path).unwrap();
+        let gz = GzDecoder::new(file);
+        let reader = BufReader::new(gz);
+        let lines: Vec<String> = reader.lines().map(|l| l.unwrap()).collect();
+
+        assert_eq!(lines, vec!["line 1", "line 3"]);
+    }
+
+    #[test]
+    fn test_empty_files() {
+        let dir = tempdir().unwrap();
+        let file_path = dir.path().join("empty.gz");
+
+        // Create an empty gzipped file
+        File::create(&file_path).unwrap();
+
+        let patterns = vec!["pattern".to_string()];
+        let (read, removed) = remove_lines_with_patterns(&file_path, &patterns).unwrap();
+
+        assert_eq!(read, 0);
+        assert_eq!(removed, 0);
+    }
+
+    #[test]
+    fn test_large_patterns_list() {
+        let dir = tempdir().unwrap();
+        let file_path = dir.path().join("test.gz");
+
+        // Create a gzipped file with some content
+        {
+            let file = File::create(&file_path).unwrap();
+            let gz = GzEncoder::new(file, Compression::default());
+            let mut writer = BufWriter::new(gz);
+            writeln!(writer, "line 1").unwrap();
+            writeln!(writer, "line 2 pattern").unwrap();
+            writeln!(writer, "line 3").unwrap();
+        }
+
+        let patterns: Vec<String> = (0..1000).map(|i| format!("pattern{}", i)).collect();
+        let (read, removed) = remove_lines_with_patterns(&file_path, &patterns).unwrap();
+
+        assert_eq!(read, 3);
+        assert_eq!(removed, 0);
+
+        // Verify the content of the file
+        let file = File::open(&file_path).unwrap();
+        let gz = GzDecoder::new(file);
+        let reader = BufReader::new(gz);
+        let lines: Vec<String> = reader.lines().map(|l| l.unwrap()).collect();
+
+        assert_eq!(lines, vec!["line 1", "line 2 pattern", "line 3"]);
+    }
+
+    #[test]
+    fn test_nested_directories() {
+        let dir = tempdir().unwrap();
+        let nested_dir = dir.path().join("nested");
+        std::fs::create_dir(&nested_dir).unwrap();
+        let file_path = nested_dir.join("test.gz");
+
+        // Create a gzipped file with some content
+        {
+            let file = File::create(&file_path).unwrap();
+            let gz = GzEncoder::new(file, Compression::default());
+            let mut writer = BufWriter::new(gz);
+            writeln!(writer, "line 1").unwrap();
+            writeln!(writer, "line 2 pattern").unwrap();
+            writeln!(writer, "line 3").unwrap();
+        }
+
+        let patterns = vec!["pattern".to_string()];
+        let (read, removed) = remove_lines_with_patterns(&file_path, &patterns).unwrap();
+
+        assert_eq!(read, 3);
+        assert_eq!(removed, 1);
+
+        // Verify the content of the file
+        let file = File::open(&file_path).unwrap();
+        let gz = GzDecoder::new(file);
+        let reader = BufReader::new(gz);
+        let lines: Vec<String> = reader.lines().map(|l| l.unwrap()).collect();
+
+        assert_eq!(lines, vec!["line 1", "line 3"]);
+    }
+
+    #[test]
+    fn test_read_only_files() {
+        let dir = tempdir().unwrap();
+        let file_path = dir.path().join("readonly.gz");
+
+        // Create a gzipped file with some content
+        {
+            let file = File::create(&file_path).unwrap();
+            let gz = GzEncoder::new(file, Compression::default());
+            let mut writer = BufWriter::new(gz);
+            writeln!(writer, "line 1").unwrap();
+            writeln!(writer, "line 2 pattern").unwrap();
+            writeln!(writer, "line 3").unwrap();
+        }
+
+        // Set the file to read-only
+        let mut perms = std::fs::metadata(&file_path).unwrap().permissions();
+        perms.set_readonly(true);
+        std::fs::set_permissions(&file_path, perms).unwrap();
+
+        let patterns = vec!["pattern".to_string()];
+        let result = remove_lines_with_patterns(&file_path, &patterns);
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_files_of_different_compression_levels() {
+        let dir = tempdir().unwrap();
+        let file_path = dir.path().join("test.gz");
+
+        // Create a gzipped file with some content at different compression levels
+        for level in 0..=9 {
+            {
+                let file = File::create(&file_path).unwrap();
+                let gz = GzEncoder::new(file, Compression::new(level));
+                let mut writer = BufWriter::new(gz);
+                writeln!(writer, "line 1").unwrap();
+                writeln!(writer, "line 2 pattern").unwrap();
+                writeln!(writer, "line 3").unwrap();
+            }
+
+            let patterns = vec!["pattern".to_string()];
+            let (read, removed) = remove_lines_with_patterns(&file_path, &patterns).unwrap();
+
+            assert_eq!(read, 3);
+            assert_eq!(removed, 1);
+
+            // Verify the content of the file
+            let file = File::open(&file_path).unwrap();
+            let gz = GzDecoder::new(file);
+            let reader = BufReader::new(gz);
+            let lines: Vec<String> = reader.lines().map(|l| l.unwrap()).collect();
+
+            assert_eq!(lines, vec!["line 1", "line 3"]);
+        }
+    }
+
+    #[test]
+    fn test_files_containing_only_patterns() {
+        let dir = tempdir().unwrap();
+        let file_path = dir.path().join("test.gz");
+
+        // Create a gzipped file with content that matches the pattern
+        {
+            let file = File::create(&file_path).unwrap();
+            let gz = GzEncoder::new(file, Compression::default());
+            let mut writer = BufWriter::new(gz);
+            writeln!(writer, "pattern").unwrap();
+            writeln!(writer, "pattern").unwrap();
+        }
+
+        let patterns = vec!["pattern".to_string()];
+        let (read, removed) = remove_lines_with_patterns(&file_path, &patterns).unwrap();
+
+        assert_eq!(read, 2);
+        assert_eq!(removed, 2);
+
+        // Verify the content of the file
+        let file = File::open(&file_path).unwrap();
+        let gz = GzDecoder::new(file);
+        let reader = BufReader::new(gz);
+        let lines: Vec<String> = reader.lines().map(|l| l.unwrap()).collect();
+
+        assert!(lines.is_empty());
+    }
+
+    #[test]
+    fn test_files_containing_binary_data() {
+        let dir = tempdir().unwrap();
+        let file_path = dir.path().join("binary.gz");
+
+        // Create a gzipped file with binary data
+        {
+            let file = File::create(&file_path).unwrap();
+            let gz = GzEncoder::new(file, Compression::default());
+            let mut writer = BufWriter::new(gz);
+            writer.write_all(&[0, 159, 146, 150]).unwrap(); // Some binary data
+        }
+
+        let patterns = vec!["pattern".to_string()];
+        let (read, removed) = remove_lines_with_patterns(&file_path, &patterns).unwrap();
+
+        assert_eq!(read, 1);
+        assert_eq!(removed, 0);
+    }
+
+    #[test]
     fn test_empty_directory() {
         let dir = tempdir().unwrap();
         let (files, total_size) = gather_gz_files(dir.path());
