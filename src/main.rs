@@ -123,7 +123,13 @@ fn remove_lines_with_patterns(
     let temp_file = NamedTempFile::new()?;
 
     // Read from .gz
-    let in_file = File::open(file_path)?;
+    let in_file = match File::open(file_path) {
+        Ok(file) => file,
+        Err(e) => {
+            warn!("Failed to open file {}: {}", file_path.display(), e);
+            return Err(Box::new(e));
+        }
+    };
     let gz_in = GzDecoder::new(in_file);
     let mut reader = BufReader::new(gz_in);
 
