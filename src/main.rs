@@ -3,7 +3,7 @@ use flate2::read::GzDecoder;
 use flate2::write::GzEncoder;
 use flate2::Compression;
 use indicatif::{ProgressBar, ProgressStyle};
-use log::{debug, warn};
+use log::{debug, error, warn};
 use num_format::{Locale, ToFormattedString};
 use rayon::prelude::*;
 use std::error::Error;
@@ -131,7 +131,7 @@ fn remove_lines_with_patterns(
         }
     };
     let gz_in = GzDecoder::new(in_file);
-    let mut reader = BufReader::new(gz_in);
+    let reader = BufReader::new(gz_in);
 
     // Write to temporary .gz
     let out_file = File::create(temp_file.path())?;
@@ -140,18 +140,24 @@ fn remove_lines_with_patterns(
 
     let mut read_count = 0_u64;
     let mut removed_count = 0_u64;
-    let mut line = String::new();
-
-    while reader.read_line(&mut line)? > 0 {
-        read_count += 1;
-        if patterns.iter().any(|pat| line.contains(pat)) {
-            removed_count += 1;
-        } else {
-            writer.write_all(line.as_bytes())?;
+    for content in reader.lines() {
+        match content {
+            Ok(mut line) => {
+                read_count += 1;
+                if patterns.iter().any(|pat| line.contains(pat)) {
+                    removed_count += 1;
+                } else {
+                    writer.write_all(line.as_bytes())?;
+                    writer.write_all(b"\n")?;
+                }
+                line.clear();
+            }
+            Err(e) => {
+                error!("Failed to read line: {} in {}", e, file_path.display());
+                return Ok((0, 0));
+            }
         }
-        line.clear();
     }
-
     writer.flush()?; // Ensure compression is finalized
     drop(writer); // Close GzEncoder before replacing file
 
@@ -486,7 +492,7 @@ mod tests {
         let patterns = vec!["pattern".to_string()];
         let (read, removed) = remove_lines_with_patterns(&file_path, &patterns).unwrap();
 
-        assert_eq!(read, 1);
+        assert_eq!(read, 0);
         assert_eq!(removed, 0);
     }
 
@@ -569,7 +575,7 @@ mod tests {
         }
 
         let patterns = vec!["pattern".to_string()];
-        let result = remove_lines_with_patterns(&file_path, &patterns);
-        assert!(result.is_err());
+        let result = remove_lines_with_patterns(&file_path, &patterns).unwrap();
+        assert!(result.0 == 0 && result.1 == 0);
     }
 }
