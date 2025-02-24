@@ -1,2 +1,3 @@
+*.log
 target/
-testdir/
+test_dir/

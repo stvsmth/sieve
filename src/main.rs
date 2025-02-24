@@ -1,4 +1,5 @@
-use clap::Parser;
+use chrono::Local;
+use clap::{Parser, ValueEnum};
 use flate2::read::GzDecoder;
 use flate2::write::GzEncoder;
 use flate2::Compression;
@@ -7,6 +8,7 @@ use log::{debug, error, warn};
 use num_format::{Locale, ToFormattedString};
 use rayon::prelude::*;
 use std::error::Error;
+use std::fs::OpenOptions;
 use std::fs::{copy, File};
 use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::path::{Path, PathBuf};
@@ -38,10 +40,37 @@ struct Args {
     /// Number of threads
     #[arg(long, default_value = "10")]
     threads: usize,
+
+    /// Log output destination
+    #[arg(long, value_enum, default_value = "file")]
+    log_output: LogOutput,
+}
+
+#[derive(ValueEnum, Clone, Debug)]
+enum LogOutput {
+    File,
+    Stdout,
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
-    env_logger::init();
+    let args = Args::parse();
+
+    let log_file_name = format!("{}-sieve.log", Local::now().format("%Y-%m-%d-%H-%M-%S"));
+
+    match args.log_output {
+        LogOutput::File => {
+            let file = OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(log_file_name)?;
+            env_logger::Builder::new()
+                .target(env_logger::Target::Pipe(Box::new(file)))
+                .init();
+        }
+        LogOutput::Stdout => {
+            env_logger::init();
+        }
+    }
 
     let args = Args::parse();
 
@@ -63,7 +92,6 @@ fn main() -> Result<(), Box<dyn Error>> {
     let total_lines_read = Arc::new(AtomicU64::new(0));
     let total_lines_removed = Arc::new(AtomicU64::new(0));
 
-    // Process files in parallel
     let pool = rayon::ThreadPoolBuilder::new()
         .num_threads(args.threads)
         .build()?;
@@ -74,7 +102,9 @@ fn main() -> Result<(), Box<dyn Error>> {
                     total_lines_read.fetch_add(read, Ordering::Relaxed);
                     total_lines_removed.fetch_add(removed, Ordering::Relaxed);
                 }
-                Err(e) => warn!("Error processing {}: {}", file_path.display(), e),
+                Err(e) => {
+                    warn!("Error processing {}: {}", file_path.display(), e);
+                }
             }
             progress.inc(*file_size);
         });
