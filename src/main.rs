@@ -4,7 +4,7 @@ use flate2::read::GzDecoder;
 use flate2::write::GzEncoder;
 use flate2::Compression;
 use indicatif::{ProgressBar, ProgressStyle};
-use log::{debug, error, warn};
+use log::{debug, error, set_max_level, warn, LevelFilter};
 use num_format::{Locale, ToFormattedString};
 use rayon::prelude::*;
 use std::error::Error;
@@ -46,7 +46,7 @@ struct Args {
     log_output: LogOutput,
 }
 
-#[derive(ValueEnum, Clone, Debug)]
+#[derive(ValueEnum, Clone, Debug, PartialEq)]
 enum LogOutput {
     File,
     Stdout,
@@ -62,10 +62,12 @@ fn main() -> Result<(), Box<dyn Error>> {
             let file = OpenOptions::new()
                 .create(true)
                 .append(true)
-                .open(log_file_name)?;
-            env_logger::Builder::new()
+                .open(&log_file_name)?;
+            let logger = env_logger::Builder::new()
                 .target(env_logger::Target::Pipe(Box::new(file)))
-                .init();
+                .build();
+            set_max_level(LevelFilter::Info);
+            log::set_boxed_logger(Box::new(logger)).unwrap();
         }
         LogOutput::Stdout => {
             env_logger::init();
@@ -123,6 +125,13 @@ fn main() -> Result<(), Box<dyn Error>> {
             .load(Ordering::Relaxed)
             .to_formatted_string(&Locale::en),
     );
+
+    if args.log_output == LogOutput::File {
+        let metadata = std::fs::metadata(&log_file_name)?;
+        if metadata.len() == 0 {
+            std::fs::remove_file(log_file_name)?;
+        }
+    }
 
     Ok(())
 }
