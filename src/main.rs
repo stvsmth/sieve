@@ -390,8 +390,14 @@ mod tests {
         let dir = tempdir().unwrap();
         let file_path = dir.path().join("empty.gz");
 
-        // Create an empty gzipped file
-        File::create(&file_path).unwrap();
+        // Create an empty gzipped file - properly initialize it as a valid gzip file
+        {
+            let file = File::create(&file_path).unwrap();
+            let gz = GzEncoder::new(file, Compression::default());
+            let mut writer = BufWriter::new(gz);
+            // Just create a valid gzip file with no content
+            writer.flush().unwrap();
+        }
 
         let patterns = vec!["pattern".to_string()];
         let (read, removed) = remove_lines_with_patterns(&file_path, &patterns).unwrap();
