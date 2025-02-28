@@ -7,7 +7,6 @@ use indicatif::{ProgressBar, ProgressStyle};
 use log::{debug, error, set_max_level, warn, LevelFilter};
 use num_format::{Locale, ToFormattedString};
 use rayon::prelude::*;
-use std::error::Error;
 use std::fs::OpenOptions;
 use std::fs::{copy, File};
 use std::io::{BufRead, BufReader, BufWriter, Write};
@@ -15,19 +14,32 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use tempfile::NamedTempFile;
+use thiserror::Error;
 use walkdir::WalkDir;
 
-// TODO:
-//  * Error Handling: The code uses Box<dyn Error> for error handling, which can be
-//    less informative than using specific error types. Consider using a custom error
-//    type or `thiserror` crate for more detailed error handling.
-//  * Logging Levels:  Ensure that the logging configuration in env_logger::init() is
-//    set to capture these levels as needed.
-//  * Progress Bar Template: Consider making progress bar width configurable or
-//    adaptive to terminal width.
-//  * Ensure that the number of threads (args.threads) is appropriate for the system's
-//    capabilities. Maybe set a sensible default based on the # of available cores.
-//  * Locale Handling: Consider removing the hard-coded locale for number formatting
+#[derive(Error, Debug)]
+enum SieveError {
+    #[error("IO error: {0}")]
+    Io(#[from] std::io::Error),
+
+    #[error("Failed to open file {path}: {source}")]
+    FileOpen {
+        path: String,
+        source: std::io::Error,
+    },
+
+    #[error("Failed to read line in {path}: {source}")]
+    LineRead {
+        path: String,
+        source: std::io::Error,
+    },
+
+    #[error("Failed to process file: {0}")]
+    Processing(String),
+
+    #[error("Thread pool error: {0}")]
+    ThreadPool(#[from] rayon::ThreadPoolBuildError),
+}
 
 #[derive(Parser, Debug)]
 struct Args {
@@ -37,13 +49,17 @@ struct Args {
     /// Patterns
     patterns: Vec<String>,
 
-    /// Number of threads
-    #[arg(long, default_value = "10")]
-    threads: usize,
+    /// Number of threads (defaults to number of logical CPUs)
+    #[arg(long)]
+    threads: Option<usize>,
 
     /// Log output destination
     #[arg(long, value_enum, default_value = "file")]
     log_output: LogOutput,
+
+    /// Locale for number formatting
+    #[arg(long, default_value = "en")]
+    locale: String,
 }
 
 #[derive(ValueEnum, Clone, Debug, PartialEq)]
@@ -52,7 +68,7 @@ enum LogOutput {
     Stdout,
 }
 
-fn main() -> Result<(), Box<dyn Error>> {
+fn main() -> Result<(), SieveError> {
     let args = Args::parse();
 
     let log_file_name = format!("{}-sieve.log", Local::now().format("%Y-%m-%d-%H-%M-%S"));
@@ -74,18 +90,24 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
     }
 
-    let args = Args::parse();
-
     let root = Path::new(&args.root_dir).canonicalize()?;
 
     // Gather gzipped files with sizes
     let (gz_files, total_size) = gather_gz_files(&root);
 
-    // Create a progress bar
+    // Create a progress bar with adaptive width
     let progress = ProgressBar::new(total_size);
+    let term_width = match term_size::dimensions() {
+        Some((width, _)) => width.max(80),
+        None => 80,
+    };
+    let bar_width = (term_width / 2).clamp(40, 100);
+
     progress.set_style(
         ProgressStyle::default_bar()
-            .template("[{elapsed_precise}] {bar:40.cyan/blue} {bytes}/{total_bytes} ({eta})")
+            .template(&format!(
+                "[{{elapsed_precise}}] {{bar:{bar_width}.cyan/blue}} {{bytes}}/{{total_bytes}} ({{eta}})"
+            ))
             .unwrap()
             .progress_chars("##-"),
     );
@@ -94,8 +116,11 @@ fn main() -> Result<(), Box<dyn Error>> {
     let total_lines_read = Arc::new(AtomicU64::new(0));
     let total_lines_removed = Arc::new(AtomicU64::new(0));
 
+    // Use available CPU cores if threads not specified
+    let thread_count = args.threads.unwrap_or_else(num_cpus::get);
+
     let pool = rayon::ThreadPoolBuilder::new()
-        .num_threads(args.threads)
+        .num_threads(thread_count)
         .build()?;
     pool.install(|| {
         gz_files.par_iter().for_each(|(file_path, file_size)| {
@@ -114,16 +139,23 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     progress.finish_with_message("Done!");
 
-    // Print final summary
-    // ... add locale-aware separators
+    // Get locale for number formatting
+    let locale = match args.locale.as_str() {
+        "fr" => Locale::fr,
+        "de" => Locale::de,
+        "ja" => Locale::ja,
+        _ => Locale::en, // Default to English
+    };
+
+    // Print final summary with locale-aware separators
     println!(
         "Removed {} lines from a total of {} lines read.",
         total_lines_removed
             .load(Ordering::Relaxed)
-            .to_formatted_string(&Locale::en),
+            .to_formatted_string(&locale),
         total_lines_read
             .load(Ordering::Relaxed)
-            .to_formatted_string(&Locale::en),
+            .to_formatted_string(&locale),
     );
 
     if args.log_output == LogOutput::File {
@@ -158,22 +190,20 @@ fn gather_gz_files(root: &Path) -> (Vec<(PathBuf, u64)>, u64) {
 fn remove_lines_with_patterns(
     file_path: &PathBuf,
     patterns: &[String],
-) -> Result<(u64, u64), Box<dyn Error>> {
-    let temp_file = NamedTempFile::new()?;
+) -> Result<(u64, u64), SieveError> {
+    let temp_file = NamedTempFile::new().map_err(SieveError::Io)?;
 
     // Read from .gz
-    let in_file = match File::open(file_path) {
-        Ok(file) => file,
-        Err(e) => {
-            warn!("Failed to open file {}: {}", file_path.display(), e);
-            return Err(Box::new(e));
-        }
-    };
+    let in_file = File::open(file_path).map_err(|e| SieveError::FileOpen {
+        path: file_path.display().to_string(),
+        source: e,
+    })?;
+
     let gz_in = GzDecoder::new(in_file);
     let reader = BufReader::new(gz_in);
 
     // Write to temporary .gz
-    let out_file = File::create(temp_file.path())?;
+    let out_file = File::create(temp_file.path()).map_err(SieveError::Io)?;
     let gz_out = GzEncoder::new(BufWriter::new(out_file), Compression::default());
     let mut writer = BufWriter::new(gz_out);
 
@@ -186,18 +216,21 @@ fn remove_lines_with_patterns(
                 if patterns.iter().any(|pat| line.contains(pat)) {
                     removed_count += 1;
                 } else {
-                    writer.write_all(line.as_bytes())?;
-                    writer.write_all(b"\n")?;
+                    writer.write_all(line.as_bytes()).map_err(SieveError::Io)?;
+                    writer.write_all(b"\n").map_err(SieveError::Io)?;
                 }
                 line.clear();
             }
             Err(e) => {
                 error!("Failed to read line: {} in {}", e, file_path.display());
-                return Ok((0, 0));
+                return Err(SieveError::LineRead {
+                    path: file_path.display().to_string(),
+                    source: e,
+                });
             }
         }
     }
-    writer.flush()?; // Ensure compression is finalized
+    writer.flush().map_err(SieveError::Io)?; // Ensure compression is finalized
     drop(writer); // Close GzEncoder before replacing file
 
     debug!(
@@ -208,7 +241,8 @@ fn remove_lines_with_patterns(
     );
 
     // Replace original file
-    copy(temp_file.path(), file_path)?;
+    copy(temp_file.path(), file_path)
+        .map_err(|e| SieveError::Processing(format!("Failed to replace original file: {e}")))?;
 
     Ok((read_count, removed_count))
 }
@@ -529,10 +563,11 @@ mod tests {
         }
 
         let patterns = vec!["pattern".to_string()];
-        let (read, removed) = remove_lines_with_patterns(&file_path, &patterns).unwrap();
+        let result = remove_lines_with_patterns(&file_path, &patterns);
 
-        assert_eq!(read, 0);
-        assert_eq!(removed, 0);
+        // With our improved error handling, this should now return an error
+        // instead of silently returning (0, 0)
+        assert!(result.is_err());
     }
 
     #[test]
@@ -614,7 +649,7 @@ mod tests {
         }
 
         let patterns = vec!["pattern".to_string()];
-        let result = remove_lines_with_patterns(&file_path, &patterns).unwrap();
-        assert!(result.0 == 0 && result.1 == 0);
+        let result = remove_lines_with_patterns(&file_path, &patterns);
+        assert!(result.is_err());
     }
 }
