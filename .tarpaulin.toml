@@ -1,0 +1,18 @@
+[default]
+# Exclude test files from coverage
+exclude-files = ["src/tests/**"]
+
+# Include all source files
+include-files = ["src/**"]
+
+# Output formats
+out = ["Html", "Xml", "Json"]
+
+# Fail if coverage is less than 70%
+min-coverage = 70
+
+# Run with --verbose for more detailed output
+verbose = true
+
+# Timeout for each test (in seconds)
+timeout = 120

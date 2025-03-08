@@ -15,5 +15,8 @@ num-format = "0.4"
 rayon = "1.6"
 tempfile = "3.17"
 term_size = "0.3"
-thiserror = "1.0"
+thiserror = "2.0"
 walkdir = "2.5"
+
+[dev-dependencies]
+criterion = "0.5"
