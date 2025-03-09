@@ -1,5 +1,11 @@
 name: Code Coverage
 
+env:
+  MIN_SUPPORTED_RUST_VERSION: "1.65.0"
+  CARGO_PROFILE_TEST_DEBUG: 0
+  # Disable incremental compilation for faster from-scratch builds
+  CARGO_INCREMENTAL: 0
+
 on:
   push:
     branches: [ main ]
@@ -7,6 +13,24 @@ on:
     branches: [ main ]
 
 jobs:
+  code-checks:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy,rustfmt
+
+      - name: Run formatter
+        run: cargo fmt --all -- --check
+
+      - name: Run clippy
+        run: cargo clippy --locked --all-targets --all-features
+
+      - name: Run tests
+        run: cargo test --locked --verbose
+
   coverage:
     name: Code Coverage
     runs-on: ubuntu-latest
@@ -28,7 +52,7 @@ jobs:
       
       - name: Generate coverage report
         run: |
-          cargo tarpaulin --config .tarpaulin.toml --out Xml --out Json --output-dir coverage
+          cargo tarpaulin --config .tarpaulin.toml --out Xml --output-dir coverage
       
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5
