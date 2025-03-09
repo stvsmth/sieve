@@ -1,5 +1,7 @@
 # Sieve
 
+[![codecov](https://codecov.io/gh/stvsmth/sieve/branch/main/graph/badge.svg)](https://codecov.io/gh/stvsmth/sieve)
+
 A tool for filtering lines from gzipped files based on patterns.
 
 ## Features
