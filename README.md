@@ -4,9 +4,14 @@
 
 A tool for filtering lines from gzipped files based on patterns.
 
+The motivating use case is removing some known unhelpful lines from large access logs downloaded
+from CloudWatch. But it could be useful elsewhere. 
+
+
 ## Features
 
-- Process multiple gzipped files in parallel
+- Process multiple log files in parallel
+- Works with gzipped files (resulting files remain gzipped)
 - Filter out lines containing specified patterns
 - Progress bar with ETA
 - Configurable thread count
