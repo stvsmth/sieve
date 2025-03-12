@@ -1,6 +1,7 @@
 name: Code Coverage
 
 env:
+  CODECOV_TOKEN: c2ddc822-055c-4273-a900-188eba682506
   MIN_SUPPORTED_RUST_VERSION: "1.65.0"
   CARGO_PROFILE_TEST_DEBUG: 0
   # Disable incremental compilation for faster from-scratch builds
