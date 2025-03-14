@@ -46,10 +46,10 @@ jobs:
       
       - name: Generate coverage report
         run: |
-          cargo tarpaulin --config .tarpaulin.toml --out Xml --output-dir coverage
+          cargo tarpaulin --config .tarpaulin.toml --out Xml --output-dir .coverage
       
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
-          files: ./coverage/cobertura.xml
+          files: ./.coverage/cobertura.xml
