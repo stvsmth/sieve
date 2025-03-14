@@ -71,12 +71,30 @@ enum LogOutput {
     Stdout,
 }
 
-fn main() -> Result<(), SieveError> {
-    let args = Args::parse();
+/// Parse command-line arguments and return the parsed args
+#[cfg(not(test))]
+fn parse_args() -> Args {
+    Args::parse()
+}
 
+/// Test-friendly version of argument parsing
+#[cfg(test)]
+fn parse_args() -> Args {
+    // In actual usage, this function is replaced by the one above
+    unreachable!("This function should only be used in tests")
+}
+
+/// Parse arguments from a vec of strings (for testing)
+#[cfg(test)]
+fn parse_args_from(args: Vec<&str>) -> Args {
+    Args::parse_from(args)
+}
+
+/// Setup logging based on the command-line arguments
+fn setup_logging(log_output: &LogOutput) -> Result<Option<String>, SieveError> {
     let log_file_name = format!("{}-sieve.log", Local::now().format("%Y-%m-%d-%H-%M-%S"));
 
-    match args.log_output {
+    match log_output {
         LogOutput::File => {
             let file = OpenOptions::new()
                 .create(true)
@@ -87,17 +105,77 @@ fn main() -> Result<(), SieveError> {
                 .build();
             set_max_level(LevelFilter::Info);
             log::set_boxed_logger(Box::new(logger)).unwrap();
+            Ok(Some(log_file_name))
         }
         LogOutput::Stdout => {
             env_logger::init();
+            Ok(None)
         }
     }
+}
+
+fn main() -> Result<(), SieveError> {
+    let args = parse_args();
+
+    let log_file_name = setup_logging(&args.log_output)?;
 
     let root = Path::new(&args.root_dir).canonicalize()?;
 
     // Gather gzipped files with sizes
     let (gz_files, total_size) = gather_gz_files(&root);
 
+    // Process files and display progress
+    let (total_lines_read, total_lines_removed) =
+        process_files(&gz_files, &args.patterns, total_size, args.threads)?;
+
+    // Print summary report
+    print_summary(total_lines_read, total_lines_removed, &args.locale);
+
+    // Clean up empty log file if needed
+    if let Some(log_file) = log_file_name {
+        cleanup_empty_log_file(&log_file)?;
+    }
+
+    Ok(())
+}
+
+/// Get locale for number formatting
+fn get_locale(locale_str: &str) -> Locale {
+    match locale_str {
+        "fr" => Locale::fr,
+        "de" => Locale::de,
+        "ja" => Locale::ja,
+        _ => Locale::en, // Default to English
+    }
+}
+
+/// Print summary of processing results
+fn print_summary(total_lines_read: u64, total_lines_removed: u64, locale_str: &str) {
+    let locale = get_locale(locale_str);
+
+    println!(
+        "Removed {} lines from a total of {} lines read.",
+        total_lines_removed.to_formatted_string(&locale),
+        total_lines_read.to_formatted_string(&locale),
+    );
+}
+
+/// Remove empty log file if exists
+fn cleanup_empty_log_file(log_file_name: &str) -> Result<(), SieveError> {
+    let metadata = std::fs::metadata(log_file_name)?;
+    if metadata.len() == 0 {
+        std::fs::remove_file(log_file_name)?;
+    }
+    Ok(())
+}
+
+/// Process all files, displaying progress and returning line counts
+fn process_files(
+    gz_files: &[(PathBuf, u64)],
+    patterns: &[String],
+    total_size: u64,
+    threads: Option<usize>,
+) -> Result<(u64, u64), SieveError> {
     // Create a progress bar with adaptive width
     let progress = ProgressBar::new(total_size);
     let term_width = match term_size::dimensions() {
@@ -120,14 +198,15 @@ fn main() -> Result<(), SieveError> {
     let total_lines_removed = Arc::new(AtomicU64::new(0));
 
     // Use available CPU cores if threads not specified
-    let thread_count = args.threads.unwrap_or_else(num_cpus::get);
+    let thread_count = threads.unwrap_or_else(num_cpus::get);
 
     let pool = rayon::ThreadPoolBuilder::new()
         .num_threads(thread_count)
         .build()?;
+
     pool.install(|| {
         gz_files.par_iter().for_each(|(file_path, file_size)| {
-            match remove_lines_with_patterns(file_path, &args.patterns) {
+            match remove_lines_with_patterns(file_path, patterns) {
                 Ok((read, removed)) => {
                     total_lines_read.fetch_add(read, Ordering::Relaxed);
                     total_lines_removed.fetch_add(removed, Ordering::Relaxed);
@@ -142,33 +221,10 @@ fn main() -> Result<(), SieveError> {
 
     progress.finish_with_message("Done!");
 
-    // Get locale for number formatting
-    let locale = match args.locale.as_str() {
-        "fr" => Locale::fr,
-        "de" => Locale::de,
-        "ja" => Locale::ja,
-        _ => Locale::en, // Default to English
-    };
-
-    // Print final summary with locale-aware separators
-    println!(
-        "Removed {} lines from a total of {} lines read.",
-        total_lines_removed
-            .load(Ordering::Relaxed)
-            .to_formatted_string(&locale),
-        total_lines_read
-            .load(Ordering::Relaxed)
-            .to_formatted_string(&locale),
-    );
-
-    if args.log_output == LogOutput::File {
-        let metadata = std::fs::metadata(&log_file_name)?;
-        if metadata.len() == 0 {
-            std::fs::remove_file(log_file_name)?;
-        }
-    }
-
-    Ok(())
+    Ok((
+        total_lines_read.load(Ordering::Relaxed),
+        total_lines_removed.load(Ordering::Relaxed),
+    ))
 }
 
 /// Gather all `.gz` files and compute their sizes.

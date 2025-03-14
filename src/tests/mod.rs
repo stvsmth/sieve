@@ -410,3 +410,189 @@ fn test_invalid_gz_file() {
     let result = remove_lines_with_patterns(&file_path, &patterns);
     assert!(result.is_err());
 }
+
+#[test]
+fn test_parse_args() {
+    // Test with specific arguments
+    let args = super::parse_args_from(vec![
+        "sieve",    // program name
+        "/tmp",     // root_dir
+        "pattern1", // patterns
+        "pattern2",
+        "--threads",
+        "4",
+        "--log-output",
+        "stdout",
+        "--locale",
+        "fr",
+    ]);
+
+    // Verify the arguments were parsed correctly
+    assert_eq!(args.root_dir, "/tmp");
+    assert_eq!(args.patterns, vec!["pattern1", "pattern2"]);
+    assert_eq!(args.threads, Some(4));
+    assert_eq!(args.log_output, super::LogOutput::Stdout);
+    assert_eq!(args.locale, "fr");
+
+    // Test with minimal arguments
+    let args = super::parse_args_from(vec!["sieve", "/tmp", "pattern1"]);
+
+    // Verify defaults are applied
+    assert_eq!(args.root_dir, "/tmp");
+    assert_eq!(args.patterns, vec!["pattern1"]);
+    assert_eq!(args.threads, None);
+    assert_eq!(args.log_output, super::LogOutput::File); // default
+    assert_eq!(args.locale, "en"); // default
+}
+
+#[test]
+fn test_get_locale() {
+    assert_eq!(super::get_locale("en"), Locale::en);
+    assert_eq!(super::get_locale("fr"), Locale::fr);
+    assert_eq!(super::get_locale("de"), Locale::de);
+    assert_eq!(super::get_locale("ja"), Locale::ja);
+    assert_eq!(super::get_locale("invalid"), Locale::en); // default
+}
+
+#[test]
+fn test_cleanup_empty_log_file() {
+    let dir = tempdir().unwrap();
+    let file_path = dir.path().join("empty.log");
+
+    // Create an empty file
+    File::create(&file_path).unwrap();
+
+    // Run the cleanup function
+    let result = super::cleanup_empty_log_file(&file_path.to_string_lossy());
+
+    // Should succeed
+    assert!(result.is_ok());
+
+    // File should be gone
+    assert!(!file_path.exists());
+
+    // Now test with a non-empty file
+    let file_path = dir.path().join("non_empty.log");
+    let mut file = File::create(&file_path).unwrap();
+    file.write_all(b"some content").unwrap();
+
+    let result = super::cleanup_empty_log_file(&file_path.to_string_lossy());
+
+    // Should succeed
+    assert!(result.is_ok());
+
+    // File should still exist
+    assert!(file_path.exists());
+}
+
+#[test]
+fn test_setup_logging() {
+    // Test stdout logging
+    let result = super::setup_logging(&super::LogOutput::Stdout);
+    assert!(result.is_ok());
+    let log_file_name = result.unwrap();
+    assert!(log_file_name.is_none());
+
+    // We can't easily test file logging without mocking filesystem
+    // In a real test environment, consider using a mock or a testing-specific
+    // implementation of the logger
+}
+
+#[test]
+fn test_print_summary() {
+    // This function only prints to stdout, so we just ensure it doesn't panic
+    super::print_summary(100, 10, "en");
+    super::print_summary(100, 10, "fr");
+    super::print_summary(100, 10, "invalid");
+}
+
+#[test]
+fn test_process_files() {
+    // Create a test directory with some files
+    let dir = tempdir().unwrap();
+    let file_path = dir.path().join("test.gz");
+
+    // Create a gzipped file with some content
+    {
+        let file = File::create(&file_path).unwrap();
+        let gz = GzEncoder::new(file, Compression::default());
+        let mut writer = BufWriter::new(gz);
+        writeln!(writer, "line 1").unwrap();
+        writeln!(writer, "line 2 pattern").unwrap();
+        writeln!(writer, "line 3").unwrap();
+    }
+
+    // Get file size for progress tracking
+    let size = std::fs::metadata(&file_path).unwrap().len();
+    let files = vec![(file_path.clone(), size)];
+
+    // Test process_files with patterns
+    let patterns = vec!["pattern".to_string()];
+    let result = super::process_files(&files, &patterns, size, Some(1));
+
+    assert!(result.is_ok());
+    let (read, removed) = result.unwrap();
+    assert_eq!(read, 3);
+    assert_eq!(removed, 1);
+
+    // Verify file contents were modified
+    let file = File::open(&file_path).unwrap();
+    let gz = GzDecoder::new(file);
+    let reader = BufReader::new(gz);
+    let lines: Vec<String> = reader.lines().map(|l| l.unwrap()).collect();
+    assert_eq!(lines, vec!["line 1", "line 3"]);
+}
+
+// An integration test for the main workflow
+#[test]
+fn test_main_workflow() {
+    // Create a test directory with files
+    let dir = tempdir().unwrap();
+    let file_path = dir.path().join("test.gz");
+
+    // Create a gzipped file with content
+    {
+        let file = File::create(&file_path).unwrap();
+        let gz = GzEncoder::new(file, Compression::default());
+        let mut writer = BufWriter::new(gz);
+        for i in 0..10 {
+            writeln!(
+                writer,
+                "line {} {}",
+                i,
+                if i % 2 == 0 { "REMOVE" } else { "keep" }
+            )
+            .unwrap();
+        }
+    }
+
+    // Parse test arguments
+    let args = super::parse_args_from(vec!["sieve", &dir.path().to_string_lossy(), "REMOVE"]);
+
+    // Skip logging setup for test (would interfere with test harness logging)
+    // let log_file = super::setup_logging(&args.log_output).unwrap();
+
+    // Process the root directory to find gz files
+    let root = Path::new(&args.root_dir);
+    let (gz_files, total_size) = super::gather_gz_files(root);
+
+    // Process files
+    let (total_lines_read, total_lines_removed) =
+        super::process_files(&gz_files, &args.patterns, total_size, args.threads).unwrap();
+
+    // Check results
+    assert_eq!(total_lines_read, 10);
+    assert_eq!(total_lines_removed, 5); // Every other line should be removed
+
+    // Verify file was modified correctly
+    let file = File::open(&file_path).unwrap();
+    let gz = GzDecoder::new(file);
+    let reader = BufReader::new(gz);
+    let lines: Vec<String> = reader.lines().map(|l| l.unwrap()).collect();
+
+    assert_eq!(lines.len(), 5);
+    for line in &lines {
+        assert!(line.contains("keep"));
+        assert!(!line.contains("REMOVE"));
+    }
+}
