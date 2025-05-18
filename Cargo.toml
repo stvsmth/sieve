@@ -19,4 +19,4 @@ thiserror = "2.0"
 walkdir = "2.5"
 
 [dev-dependencies]
-criterion = "0.5"
+criterion = "0.6"
