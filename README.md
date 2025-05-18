@@ -15,7 +15,6 @@ from CloudWatch. But it could be useful elsewhere.
 - Filter out lines containing specified patterns
 - Progress bar with ETA
 - Configurable thread count
-- Locale-aware number formatting
 
 ## Usage
 

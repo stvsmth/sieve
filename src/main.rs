@@ -141,11 +141,11 @@ fn setup_logging(log_output: &LogOutput) -> Result<Option<String>, SieveError> {
 
 /// Get locale for number formatting
 fn get_locale(locale_str: &str) -> Locale {
-    match locale_str {
-        "fr" => Locale::fr,
-        "de" => Locale::de,
-        "ja" => Locale::ja,
-        _ => Locale::en, // Default to English
+    if let Ok(locale) = locale_str.parse::<Locale>() {
+        locale
+    } else {
+        warn!("Invalid locale string '{locale_str}' provided. Defaulting to 'en'.",);
+        Locale::en
     }
 }
 

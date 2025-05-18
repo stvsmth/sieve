@@ -2,6 +2,7 @@ use super::*;
 use flate2::Compression;
 use flate2::read::GzDecoder;
 use flate2::write::GzEncoder;
+use num_format::{Locale, ToFormattedString};
 use std::io::Write;
 use tempfile::tempdir;
 
@@ -45,6 +46,31 @@ fn test_remove_lines_with_patterns() {
     let lines: Vec<String> = reader.lines().map(|l| l.unwrap()).collect();
 
     assert_eq!(lines, vec!["line 1", "line 3"]);
+}
+
+#[test]
+fn test_locale_es_formatting() {
+    let locale_es = super::get_locale("es");
+    // Spanish (es) locale, the expected format for a number like 12,345.67 (en) is "12.345,67".
+    assert_eq!(locale_es.decimal(), ",");
+    assert_eq!(locale_es.separator(), ".");
+
+    // Test with an integer to ensure thousands separator is correct using to_formatted_string
+    let int_num: i64 = 1234567;
+    let formatted_int_num = int_num.to_formatted_string(&locale_es);
+    assert_eq!(formatted_int_num, "1.234.567");
+}
+
+#[test]
+fn test_locale_en_formatting() {
+    let locale_en = super::get_locale("en");
+    assert_eq!(locale_en.decimal(), ".");
+    assert_eq!(locale_en.separator(), ",");
+
+    // Test with an integer to ensure thousands separator is correct using to_formatted_string
+    let int_num: i64 = 1234567;
+    let formatted_int_num = int_num.to_formatted_string(&locale_en);
+    assert_eq!(formatted_int_num, "1,234,567");
 }
 
 #[test]
