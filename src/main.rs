@@ -71,6 +71,31 @@ enum LogOutput {
     Stdout,
 }
 
+fn main() -> Result<(), SieveError> {
+    let args = parse_args();
+
+    let log_file_name = setup_logging(&args.log_output)?;
+
+    let root = Path::new(&args.root_dir).canonicalize()?;
+
+    // Gather gzipped files with sizes
+    let (gz_files, total_size) = gather_gz_files(&root);
+
+    // Process files and display progress
+    let (total_lines_read, total_lines_removed) =
+        process_files(&gz_files, &args.patterns, total_size, args.threads)?;
+
+    // Print summary report
+    print_summary(total_lines_read, total_lines_removed, &args.locale);
+
+    // Clean up empty log file if needed
+    if let Some(log_file) = log_file_name {
+        cleanup_empty_log_file(&log_file)?;
+    }
+
+    Ok(())
+}
+
 /// Parse command-line arguments and return the parsed args
 #[cfg(not(test))]
 fn parse_args() -> Args {
@@ -112,31 +137,6 @@ fn setup_logging(log_output: &LogOutput) -> Result<Option<String>, SieveError> {
             Ok(None)
         }
     }
-}
-
-fn main() -> Result<(), SieveError> {
-    let args = parse_args();
-
-    let log_file_name = setup_logging(&args.log_output)?;
-
-    let root = Path::new(&args.root_dir).canonicalize()?;
-
-    // Gather gzipped files with sizes
-    let (gz_files, total_size) = gather_gz_files(&root);
-
-    // Process files and display progress
-    let (total_lines_read, total_lines_removed) =
-        process_files(&gz_files, &args.patterns, total_size, args.threads)?;
-
-    // Print summary report
-    print_summary(total_lines_read, total_lines_removed, &args.locale);
-
-    // Clean up empty log file if needed
-    if let Some(log_file) = log_file_name {
-        cleanup_empty_log_file(&log_file)?;
-    }
-
-    Ok(())
 }
 
 /// Get locale for number formatting
