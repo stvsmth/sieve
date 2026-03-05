@@ -44,6 +44,12 @@ enum SieveError {
     ThreadPool(#[from] rayon::ThreadPoolBuildError),
 }
 
+#[derive(ValueEnum, Clone, Debug, PartialEq)]
+enum Mode {
+    Remove,
+    Keep,
+}
+
 #[derive(Parser, Debug)]
 struct Args {
     /// Root directory
@@ -51,6 +57,10 @@ struct Args {
 
     /// Patterns
     patterns: Vec<String>,
+
+    /// Mode: remove matching lines or keep only matching lines
+    #[arg(long, value_enum, default_value = "remove")]
+    mode: Mode,
 
     /// Number of threads (defaults to number of logical CPUs)
     #[arg(long)]
@@ -82,11 +92,21 @@ fn main() -> Result<(), SieveError> {
     let (gz_files, total_size) = gather_gz_files(&root);
 
     // Process files and display progress
-    let (total_lines_read, total_lines_removed) =
-        process_files(&gz_files, &args.patterns, total_size, args.threads)?;
+    let (total_lines_read, total_lines_filtered) = process_files(
+        &gz_files,
+        &args.patterns,
+        &args.mode,
+        total_size,
+        args.threads,
+    )?;
 
     // Print summary report
-    print_summary(total_lines_read, total_lines_removed, &args.locale);
+    print_summary(
+        total_lines_read,
+        total_lines_filtered,
+        &args.mode,
+        &args.locale,
+    );
 
     // Clean up empty log file if needed
     if let Some(log_file) = log_file_name {
@@ -150,12 +170,16 @@ fn get_locale(locale_str: &str) -> Locale {
 }
 
 /// Print summary of processing results
-fn print_summary(total_lines_read: u64, total_lines_removed: u64, locale_str: &str) {
+fn print_summary(total_lines_read: u64, total_lines_filtered: u64, mode: &Mode, locale_str: &str) {
     let locale = get_locale(locale_str);
+    let action = match mode {
+        Mode::Remove => "Removed",
+        Mode::Keep => "Kept",
+    };
 
     println!(
-        "Removed {} lines from a total of {} lines read.",
-        total_lines_removed.to_formatted_string(&locale),
+        "{action} {} lines from a total of {} lines read.",
+        total_lines_filtered.to_formatted_string(&locale),
         total_lines_read.to_formatted_string(&locale),
     );
 }
@@ -173,6 +197,7 @@ fn cleanup_empty_log_file(log_file_name: &str) -> Result<(), SieveError> {
 fn process_files(
     gz_files: &[(PathBuf, u64)],
     patterns: &[String],
+    mode: &Mode,
     total_size: u64,
     threads: Option<usize>,
 ) -> Result<(u64, u64), SieveError> {
@@ -193,9 +218,9 @@ fn process_files(
             .progress_chars("##-"),
     );
 
-    // Atomic counters for total lines read and removed
+    // Atomic counters for total lines read and filtered
     let total_lines_read = Arc::new(AtomicU64::new(0));
-    let total_lines_removed = Arc::new(AtomicU64::new(0));
+    let total_lines_filtered = Arc::new(AtomicU64::new(0));
 
     // Use available CPU cores if threads not specified
     let thread_count = threads.unwrap_or_else(num_cpus::get);
@@ -206,10 +231,10 @@ fn process_files(
 
     pool.install(|| {
         gz_files.par_iter().for_each(|(file_path, file_size)| {
-            match remove_lines_with_patterns(file_path, patterns) {
-                Ok((read, removed)) => {
+            match filter_lines(file_path, patterns, mode) {
+                Ok((read, filtered)) => {
                     total_lines_read.fetch_add(read, Ordering::Relaxed);
-                    total_lines_removed.fetch_add(removed, Ordering::Relaxed);
+                    total_lines_filtered.fetch_add(filtered, Ordering::Relaxed);
                 }
                 Err(e) => {
                     warn!("Error processing {}: {}", file_path.display(), e);
@@ -223,7 +248,7 @@ fn process_files(
 
     Ok((
         total_lines_read.load(Ordering::Relaxed),
-        total_lines_removed.load(Ordering::Relaxed),
+        total_lines_filtered.load(Ordering::Relaxed),
     ))
 }
 
@@ -245,10 +270,14 @@ fn gather_gz_files(root: &Path) -> (Vec<(PathBuf, u64)>, u64) {
     (gz_files, total_size)
 }
 
-/// Removes lines containing any pattern from a single `.gz` file.
-fn remove_lines_with_patterns(
+/// Filters lines in a single `.gz` file based on mode.
+/// In Remove mode, removes lines matching any pattern.
+/// In Keep mode, keeps only lines matching any pattern.
+/// Returns (`lines_read`, `lines_removed_or_kept`).
+fn filter_lines(
     file_path: &PathBuf,
     patterns: &[String],
+    mode: &Mode,
 ) -> Result<(u64, u64), SieveError> {
     let temp_file = NamedTempFile::new().map_err(SieveError::Io)?;
 
@@ -267,16 +296,22 @@ fn remove_lines_with_patterns(
     let mut writer = BufWriter::new(gz_out);
 
     let mut read_count = 0_u64;
-    let mut removed_count = 0_u64;
+    let mut filtered_count = 0_u64;
     for content in reader.lines() {
         match content {
             Ok(mut line) => {
                 read_count += 1;
-                if patterns.iter().any(|pat| line.contains(pat)) {
-                    removed_count += 1;
-                } else {
+                let matches = patterns.iter().any(|pat| line.contains(pat));
+                let write_line = match mode {
+                    Mode::Remove => !matches,
+                    Mode::Keep => matches,
+                };
+                if write_line {
                     writer.write_all(line.as_bytes()).map_err(SieveError::Io)?;
                     writer.write_all(b"\n").map_err(SieveError::Io)?;
+                }
+                if matches {
+                    filtered_count += 1;
                 }
                 line.clear();
             }
@@ -292,10 +327,14 @@ fn remove_lines_with_patterns(
     writer.flush().map_err(SieveError::Io)?; // Ensure compression is finalized
     drop(writer); // Close GzEncoder before replacing file
 
+    let action = match mode {
+        Mode::Remove => "removed",
+        Mode::Keep => "kept",
+    };
     debug!(
-        "Processed {}: removed {} lines of {} total lines.",
+        "Processed {}: {action} {} lines of {} total lines.",
         file_path.display(),
-        removed_count,
+        filtered_count,
         read_count,
     );
 
@@ -303,5 +342,5 @@ fn remove_lines_with_patterns(
     copy(temp_file.path(), file_path)
         .map_err(|e| SieveError::Processing(format!("Failed to replace original file: {e}")))?;
 
-    Ok((read_count, removed_count))
+    Ok((read_count, filtered_count))
 }

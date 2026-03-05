@@ -19,7 +19,7 @@ fn test_gather_gz_files() {
 }
 
 #[test]
-fn test_remove_lines_with_patterns() {
+fn test_filter_lines() {
     let dir = tempdir().unwrap();
     let file_path = dir.path().join("test.gz");
 
@@ -34,7 +34,7 @@ fn test_remove_lines_with_patterns() {
     }
 
     let patterns = vec!["pattern".to_string()];
-    let (read, removed) = remove_lines_with_patterns(&file_path, &patterns).unwrap();
+    let (read, removed) = filter_lines(&file_path, &patterns, &Mode::Remove).unwrap();
 
     assert_eq!(read, 3);
     assert_eq!(removed, 1);
@@ -89,7 +89,7 @@ fn test_no_patterns() {
     }
 
     let patterns: Vec<String> = vec![];
-    let (read, removed) = remove_lines_with_patterns(&file_path, &patterns).unwrap();
+    let (read, removed) = filter_lines(&file_path, &patterns, &Mode::Remove).unwrap();
 
     assert_eq!(read, 3);
     assert_eq!(removed, 0);
@@ -119,7 +119,7 @@ fn test_non_existent_patterns() {
     }
 
     let patterns = vec!["nonexistent".to_string()];
-    let (read, removed) = remove_lines_with_patterns(&file_path, &patterns).unwrap();
+    let (read, removed) = filter_lines(&file_path, &patterns, &Mode::Remove).unwrap();
 
     assert_eq!(read, 3);
     assert_eq!(removed, 0);
@@ -149,7 +149,7 @@ fn test_special_characters_in_patterns() {
     }
 
     let patterns = vec!["special*chars".to_string()];
-    let (read, removed) = remove_lines_with_patterns(&file_path, &patterns).unwrap();
+    let (read, removed) = filter_lines(&file_path, &patterns, &Mode::Remove).unwrap();
 
     assert_eq!(read, 3);
     assert_eq!(removed, 1);
@@ -178,7 +178,7 @@ fn test_empty_files() {
     }
 
     let patterns = vec!["pattern".to_string()];
-    let (read, removed) = remove_lines_with_patterns(&file_path, &patterns).unwrap();
+    let (read, removed) = filter_lines(&file_path, &patterns, &Mode::Remove).unwrap();
 
     assert_eq!(read, 0);
     assert_eq!(removed, 0);
@@ -200,7 +200,7 @@ fn test_large_patterns_list() {
     }
 
     let patterns: Vec<String> = (0..1000).map(|i| format!("pattern{}", i)).collect();
-    let (read, removed) = remove_lines_with_patterns(&file_path, &patterns).unwrap();
+    let (read, removed) = filter_lines(&file_path, &patterns, &Mode::Remove).unwrap();
 
     assert_eq!(read, 3);
     assert_eq!(removed, 0);
@@ -232,7 +232,7 @@ fn test_nested_directories() {
     }
 
     let patterns = vec!["pattern".to_string()];
-    let (read, removed) = remove_lines_with_patterns(&file_path, &patterns).unwrap();
+    let (read, removed) = filter_lines(&file_path, &patterns, &Mode::Remove).unwrap();
 
     assert_eq!(read, 3);
     assert_eq!(removed, 1);
@@ -267,7 +267,7 @@ fn test_read_only_files() {
     std::fs::set_permissions(&file_path, perms).unwrap();
 
     let patterns = vec!["pattern".to_string()];
-    let result = remove_lines_with_patterns(&file_path, &patterns);
+    let result = filter_lines(&file_path, &patterns, &Mode::Remove);
 
     assert!(result.is_err());
 }
@@ -289,7 +289,7 @@ fn test_files_of_different_compression_levels() {
         }
 
         let patterns = vec!["pattern".to_string()];
-        let (read, removed) = remove_lines_with_patterns(&file_path, &patterns).unwrap();
+        let (read, removed) = filter_lines(&file_path, &patterns, &Mode::Remove).unwrap();
 
         assert_eq!(read, 3);
         assert_eq!(removed, 1);
@@ -319,7 +319,7 @@ fn test_files_containing_only_patterns() {
     }
 
     let patterns = vec!["pattern".to_string()];
-    let (read, removed) = remove_lines_with_patterns(&file_path, &patterns).unwrap();
+    let (read, removed) = filter_lines(&file_path, &patterns, &Mode::Remove).unwrap();
 
     assert_eq!(read, 2);
     assert_eq!(removed, 2);
@@ -347,7 +347,7 @@ fn test_files_containing_binary_data() {
     }
 
     let patterns = vec!["pattern".to_string()];
-    let result = remove_lines_with_patterns(&file_path, &patterns);
+    let result = filter_lines(&file_path, &patterns, &Mode::Remove);
 
     // With our improved error handling, this should now return an error
     // instead of silently returning (0, 0)
@@ -379,7 +379,7 @@ fn test_multiple_patterns() {
     }
 
     let patterns = vec!["pattern1".to_string(), "pattern2".to_string()];
-    let (read, removed) = remove_lines_with_patterns(&file_path, &patterns).unwrap();
+    let (read, removed) = filter_lines(&file_path, &patterns, &Mode::Remove).unwrap();
 
     assert_eq!(read, 4);
     assert_eq!(removed, 2);
@@ -415,7 +415,7 @@ fn test_large_file() {
     }
 
     let patterns = vec!["remove".to_string()];
-    let (read, removed) = remove_lines_with_patterns(&file_path, &patterns).unwrap();
+    let (read, removed) = filter_lines(&file_path, &patterns, &Mode::Remove).unwrap();
 
     assert_eq!(read, 1000);
     assert_eq!(removed, 100); // Every 10th line should be removed
@@ -433,7 +433,7 @@ fn test_invalid_gz_file() {
     }
 
     let patterns = vec!["pattern".to_string()];
-    let result = remove_lines_with_patterns(&file_path, &patterns);
+    let result = filter_lines(&file_path, &patterns, &Mode::Remove);
     assert!(result.is_err());
 }
 
@@ -527,9 +527,9 @@ fn test_setup_logging() {
 #[test]
 fn test_print_summary() {
     // This function only prints to stdout, so we just ensure it doesn't panic
-    super::print_summary(100, 10, "en");
-    super::print_summary(100, 10, "fr");
-    super::print_summary(100, 10, "invalid");
+    super::print_summary(100, 10, &Mode::Remove, "en");
+    super::print_summary(100, 10, &Mode::Keep, "fr");
+    super::print_summary(100, 10, &Mode::Remove, "invalid");
 }
 
 #[test]
@@ -554,7 +554,7 @@ fn test_process_files() {
 
     // Test process_files with patterns
     let patterns = vec!["pattern".to_string()];
-    let result = super::process_files(&files, &patterns, size, Some(1));
+    let result = super::process_files(&files, &patterns, &Mode::Remove, size, Some(1));
 
     assert!(result.is_ok());
     let (read, removed) = result.unwrap();
@@ -603,8 +603,14 @@ fn test_main_workflow() {
     let (gz_files, total_size) = super::gather_gz_files(root);
 
     // Process files
-    let (total_lines_read, total_lines_removed) =
-        super::process_files(&gz_files, &args.patterns, total_size, args.threads).unwrap();
+    let (total_lines_read, total_lines_removed) = super::process_files(
+        &gz_files,
+        &args.patterns,
+        &Mode::Remove,
+        total_size,
+        args.threads,
+    )
+    .unwrap();
 
     // Check results
     assert_eq!(total_lines_read, 10);
